@@ -5,7 +5,7 @@ const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 
 // ⚠️ COLOQUE O ID DA SUA LIVE AQUI (Ex: as letras depois do v= no link do YouTube)
-const liveId = "COLOQUE_SEU_ID_AQUI"; 
+const liveId = "h1UCuJGHrU4"; 
 const liveChat = new LiveChat({ liveId });
 
 let jogadores = {};
@@ -60,4 +60,5 @@ liveChat.on("error", (err) => console.log("Aguardando mensagens..."));
 liveChat.start();
 http.listen(3000, () => {
     console.log("🚀 Servidor rodando! Abra http://localhost:3000");
+
 });
