@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Champions de Inscritos</title>
+    <style>
+        body { margin: 0; background-color: #111; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Arial Black', sans-serif; overflow: hidden;}
+        #tela { width: 400px; height: 700px; background-color: #2e8b57; border: 4px solid #fff; border-radius: 10px; position: relative; overflow: hidden; }
+        #placar { position: absolute; top: 15px; width: 100%; text-align: center; color: white; font-size: 22px; text-shadow: 2px 2px 0 #000; z-index: 10; }
+        #avisos { position: absolute; top: 50px; width: 100%; text-align: center; color: yellow; font-size: 16px; text-shadow: 1px 1px 0 #000; z-index: 10; font-weight: bold;}
+        canvas { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    </style>
+</head>
+<body>
+    <div id="tela">
+        <div id="placar">AZUL 0 x 0 VERMELHO</div>
+        <div id="avisos">Pressione ESPAÇO para começar!</div>
+        <canvas id="campo" width="400" height="700"></canvas>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('campo');
+        const ctx = canvas.getContext('2d');
+        
+        let estado = "lobby"; // lobby ou jogando
+        let bola = { x: 200, y: 350, r: 12, vx: 0, vy: 0 };
+        let bots = [];
+        let golsAzul = 0, golsVerm = 0;
+
+        // Atualiza a lista de quem está no jogo
+        socket.on('atualizarLobby', (jogadores) => {
+            if (estado === "jogando") return;
+            bots = jogadores.map(jog => ({
+                ...jog,
+                x: Math.random() * 300 + 50,
+                y: jog.time === 'azul' ? Math.random() * 100 + 50 : Math.random() * 100 + 550,
+                velocidadeBase: jog.premium ? 4.5 : 2.5,
+                vx: 0, vy: 0,
+                congelado: 0
+            }));
+            document.getElementById('avisos').innerText = `${bots.length} jogadores prontos. Aperte ESPAÇO!`;
+        });
+
+        // Recebe os poderes do chat
+        socket.on('usarPoder', (dados) => {
+            if (estado !== "jogando") return;
+            const quemUsou = bots.find(b => b.id === dados.id);
+            if (!quemUsou) return;
+
+            if (dados.poder === 'gelo') {
+                document.getElementById('avisos').innerText = `❄️ ${quemUsou.nome} usou GELO!`;
+                bots.forEach(b => { if (b.time !== quemUsou.time) b.congelado = 180; }); // Congela inimigos por 3 seg (60 frames * 3)
+            }
+            if (dados.poder === 'turbo') {
+                document.getElementById('avisos').innerText = `🔥 ${quemUsou.nome} usou TURBO!`;
+                quemUsou.velocidadeBase = 8;
+                setTimeout(() => quemUsou.velocidadeBase = (quemUsou.premium ? 4.5 : 2.5), 3000); // Volta ao normal
+            }
+            setTimeout(() => document.getElementById('avisos').innerText = "", 3000);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && estado === "lobby" && bots.length > 0) {
+                estado = "jogando";
+                document.getElementById('avisos').innerText = "Valendo!";
+                setTimeout(() => document.getElementById('avisos').innerText = "", 2000);
+                loop();
+            }
+        });
+
+        function loop() {
+            if (estado !== "jogando") return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Linha do meio
+            ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(0, 350); ctx.lineTo(400, 350); ctx.stroke();
+
+            // Física da Bola
+            bola.x += bola.vx; bola.y += bola.vy;
+            bola.vx *= 0.95; bola.vy *= 0.95; // atrito
+            if (bola.x < bola.r || bola.x > canvas.width - bola.r) bola.vx *= -1; // parede lateral
+
+            // Gols
+            if (bola.y < 0) { golsVerm++; resetar(); }
+            if (bola.y > canvas.height) { golsAzul++; resetar(); }
+
+            // Desenha a Bola
+            ctx.beginPath(); ctx.arc(bola.x, bola.y, bola.r, 0, Math.PI*2);
+            ctx.fillStyle = "white"; ctx.fill();
+
+            // Lógica dos Bots
+            bots.forEach(bot => {
+                if (bot.congelado > 0) {
+                    bot.congelado--; // Desconta o tempo do gelo
+                } else {
+                    let dx = bola.x - bot.x;
+                    let dy = bola.y - bot.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+
+                    if (dist > 15) {
+                        bot.x += (dx / dist) * bot.velocidadeBase;
+                        bot.y += (dy / dist) * bot.velocidadeBase;
+                    }
+                    if (dist < 25) { // Chute
+                        bola.vx = (dx / dist) * 12;
+                        bola.vy = (dy / dist) * 12;
+                    }
+                }
+
+                // Desenho do Bot
+                ctx.beginPath(); ctx.arc(bot.x, bot.y, 16, 0, Math.PI*2);
+                ctx.fillStyle = bot.congelado > 0 ? "#00FFFF" : (bot.time === 'azul' ? "#007BFF" : "#FF3B30");
+                ctx.fill();
+                if(bot.premium) { ctx.lineWidth = 3; ctx.strokeStyle = "gold"; ctx.stroke(); }
+                
+                // Nome
+                ctx.fillStyle = "white"; ctx.font = "bold 11px Arial"; ctx.textAlign = "center";
+                ctx.fillText(bot.nome.substring(0, 8), bot.x, bot.y - 20);
+                if(bot.premium) ctx.fillText("👑", bot.x, bot.y - 32);
+            });
+
+            requestAnimationFrame(loop);
+        }
+
+        function resetar() {
+            bola.x = 200; bola.y = 350; bola.vx = 0; bola.vy = 0;
+            document.getElementById('placar').innerText = `AZUL ${golsAzul} x ${golsVerm} VERMELHO`;
+            bots.forEach(b => {
+                b.y = b.time === 'azul' ? Math.random() * 100 + 50 : Math.random() * 100 + 550;
+                b.congelado = 0;
+            });
+        }
+    </script>
+</body>
+</html>
